@@ -1,3 +1,4 @@
+"""Basic "Construct a Custom Bin" sample code"""
 import gi
 gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
@@ -65,14 +66,15 @@ class AudioBin(Gst.Bin):
         ]
         for element in elements:
             self.add(element)
-        for (first,second) in zip(elements,elements[1:]):
-            first.link(second)
-        self.sink_pad = Gst.GhostPad.new('sink',elements[0].get_static_pad('sink'))
-        self.add_pad( self.sink_pad )
         self.src_pad = Gst.GhostPad.new('src',elements[-1].get_static_pad('src'))
         self.add_pad( self.src_pad )
-        # This does *not* seem correct as a requirement
-        self.set_state( Gst.State.STATE_PAUSED )
+        self.sink_pad = Gst.GhostPad.new('sink',elements[0].get_static_pad('sink'))
+        self.add_pad( self.sink_pad )
+        for (first,second) in zip(elements,elements[1:]):
+            first.link(second)
+        #raise AttributeError("moo")
+        #self.set_state( Gst.State.STATE_PAUSED )# this raised an attribute error, which seems to be necessary???
+
 
 def plugin_init(plugin, userarg=None):
     AudioBinType = GObject.type_register(AudioBin)
@@ -80,7 +82,7 @@ def plugin_init(plugin, userarg=None):
     return True
 
 version = Gst.version()
-result = Gst.Plugin.register_static_full(
+REGISTRATION_RESULT = Gst.Plugin.register_static_full(
     version[0],  # GST_VERSION_MAJOR
     version[1],  # GST_VERSION_MINOR
     'audiobin',

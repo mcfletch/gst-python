@@ -5,9 +5,10 @@ gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
 Gst.init_check(None)
 import audiobin
-assert audiobin
+assert audiobin.REGISTRATION_RESULT, """Failed to register the audiobin"""
 
 def manual_create():
+    """Manually setup a pipeline with direct element creation"""
     pipe = Gst.Pipeline.new()
     
     elements = [
@@ -33,7 +34,8 @@ def parse_create():
     return pipe
 
 def main():
-    pipe = parse_create()
+    #pipe = parse_create()
+    pipe = manual_create()
     pipe.set_state( Gst.State.PLAYING )
     LOOP = GObject.MainLoop()
     LOOP.run()
