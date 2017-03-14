@@ -23,41 +23,16 @@ WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR 
 OTHER DEALINGS IN THE SOFTWARE.
 """
-import logging, time
+import logging
 import gi
 gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
+import utils
+import udptimeout
 log = logging.getLogger(__name__)
 
 NANOSECOND = 1e6
 
-def create_element(typ,name=None,**properties):
-    """Convenience function to create elements in a single call"""
-    element = Gst.ElementFactory.make(typ)
-    if name:
-        element.set_property('name',name)
-    if properties:
-        for key,value in properties.items():
-            element.set_property(key.replace('_','-'),value)
-    return element
-class EasyBin( Gst.Bin ):
-    """Just a bin that links its elements"""
-    def __init__(self, name, elements ):
-        super(EasyBin,self).__init__( name )
-        for element in elements:
-            self.add(element)
-        for element,next in zip(elements,elements[1:]):
-            element.link( next )
-        for pad in elements[0].sinkpads:
-            self.add_pad(
-                Gst.GhostPad( pad.name, pad ),
-            )
-        for pad in elements[-1].srcpads:
-            self.add_pad(
-                Gst.GhostPad( pad.name, pad )
-            )
-        for element in elements:
-            element.sync_state_with_parent( )
 
 class RetryBin( Gst.Bin ):
     """Bin that restarts the source when its queue is empty, and EOS occurs or there's an error"""
@@ -80,7 +55,7 @@ class RetryBin( Gst.Bin ):
     def __init__(self, build_callback, **named ):
         super(RetryBin,self).__init__()
         self.build_callback = build_callback
-        self.selector = create_element(
+        self.selector = utils.create_element(
             'input-selector',
             'selector',
         )
@@ -93,7 +68,7 @@ class RetryBin( Gst.Bin ):
             def default_build(*args,**named):
                 # This isn't very useful, as it doesn't properly use the 
                 # real source's format to control the test source
-                return create_element('videotestsrc', pattern=2)
+                return utils.create_element('videotestsrc', pattern=2)
         self.default_src,self.default_sink = self.rebuild_source( default_build, False )
         element,sink = self.rebuild_source(self.build_callback)
         self.selector.set_property('active-pad',sink)
@@ -155,57 +130,6 @@ class RetryBin( Gst.Bin ):
         else:
             return pad.event_default( self.selector, event )
 
-class UDPTimeout( EasyBin ):
-    _timeout = 1.0
-    @GObject.Property(
-        type=float,
-        nick='timeout',
-        default=1.0,
-        blurb='Timeout to apply to the udp sources',
-    )
-    def timeout(self):
-        return self._timeout
-    @timeout.setter
-    def timeout(self,new_timeout):
-        self._timeout = new_timeout
-    def __init__(self, **named ):
-        self.src = create_element( 'udpsrc', **named )
-        self.queue = create_element( 'queue', min_threshold_buffers=5 )
-        super(UDPTimeout,self).__init__('udp-timeout-src',[
-            self.src,
-            self.queue,
-        ])
-        self.queue.connect( 'underrun', self.on_underrun )
-        self.queue.connect( 'running', self.on_pushing )
-        self.started = False
-        self.underrun_ts = 0.0
-    def on_underrun(self, *args, **named ):
-        log.debug("Underrun" )
-        if not self.underrun_ts:
-            self.underrun_ts = time.time()
-        self.should_send_eos()
-        self.set_state( Gst.State.PAUSED )
-        return False
-    def should_send_eos(self):
-        """Check if we should send our EOS event"""
-        delta = (time.time() - self.underrun_ts)
-        if delta < self.timeout:
-            sleep_time = (self.timeout-delta)
-            log.debug('Not yet ready to EOS should set a timer/callback for timeout in %0.1fs',sleep_time)
-            GObject.timeout_add( sleep_time*1000., self.should_send_eos )
-            return False
-        else:
-            log.debug("Timeout, sending the EOS event")
-            pad = self.queue.get_static_pad('sink')
-            eos = Gst.Event.new_eos()
-            pad.send_event( eos )
-            return False
-    def on_pushing(self, *args, **named):
-        log.debug("Pushing data, resetting internal state")
-        self.set_state( Gst.State.PLAYING )
-        self.started = True 
-        self.underrun_ts = 0.0
-        return True
     
 
 class UDPFailoverBin( RetryBin ):
@@ -251,7 +175,7 @@ class UDPFailoverBin( RetryBin ):
         self.current_index = (self.current_index +1)%len(self.creators)
         new_item = self.creators[self.current_index]
         log.info("Creating element: %s", new_item)
-        element = UDPTimeout(
+        element = udptimeout.UDPTimeout(
             **new_item
         )
         return element
@@ -259,8 +183,6 @@ class UDPFailoverBin( RetryBin ):
 def plugin_init(plugin, userarg=None):
     RetryBinType = GObject.type_register(RetryBin)
     Gst.Element.register(plugin, 'retrybin', 0, RetryBinType)
-    UDPTimeoutType = GObject.type_register(UDPTimeout)
-    Gst.Element.register(plugin, 'udptimeout', 0, UDPTimeoutType)
     return True
 
 version = Gst.version()
@@ -271,7 +193,7 @@ REGISTRATION_RESULT = Gst.Plugin.register_static_full(
     'Pad Probes, EOS handling',
     plugin_init,
     '1.0.0',
-    'LGPL',
+    'MIT/X11',
     'example',
     'example',
     'https://gstreamer.freedesktop.org/modules/gst-python.html',

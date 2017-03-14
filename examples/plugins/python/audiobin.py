@@ -89,7 +89,7 @@ REGISTRATION_RESULT = Gst.Plugin.register_static_full(
     'Demonstration of a simple bin plugin in Python',
     plugin_init,
     '1.0.0',
-    'LGPL',
+    'MIT/X11',
     'example',
     'example',
     'https://gstreamer.freedesktop.org/modules/gst-python.html',
