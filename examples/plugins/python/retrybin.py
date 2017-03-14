@@ -5,6 +5,8 @@ gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
 log = logging.getLogger(__name__)
 
+
+
 def create_element(typ,name=None,**properties):
     """Convenience function to create elements in a single call"""
     element = Gst.ElementFactory.make(typ)
@@ -38,14 +40,14 @@ class RetryBin( Gst.Bin ):
     __gstdetails__ = (
         'Retry Bin',
         'Manager',
-        'When an error or underflow occurs restarts the client element(s)',
+        'When an error or underflow occurs restarts the client (src) element(s)',
         'Mike Fletcher <mcfletch@vrplumber.com>',
     )
     src_template = Gst.PadTemplate.new(
         'src',
         Gst.PadDirection.SRC,
         Gst.PadPresence.ALWAYS,
-        Gst.Caps.from_string('video/x-raw'),
+        Gst.Caps.new_any(),
     )
     __gst_templates__ = [
         src_template,
@@ -96,15 +98,13 @@ class RetryBin( Gst.Bin ):
             )
         src.link( selector_sink )
         current_element.sync_state_with_parent()
-#        self.selector.set_property( 'active-pad', selector_sink )
         return current_element,selector_sink
-        
+    
     _restarting = False
     _block_probe = None
     def on_pad_event(self, pad, probe_info, user_data = None ):
         event = probe_info.get_event()
         if event.type == Gst.EventType.EOS:
-#            self.selector.set_property('active-pad',self.default_sink)
             (current_element,src,selector_sink) = user_data
             def on_blocked( *args ):
                 log.info("Reconstructing element")
