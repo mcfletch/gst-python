@@ -3,6 +3,7 @@ import gi
 gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
 Gst.init_check(None)
+import utils
 import retrybin
 assert retrybin.REGISTRATION_RESULT, """Failed to register the retrybin"""
 
@@ -15,22 +16,22 @@ def test_main():
         """Callback that re-creates source when called"""
         patterns = [ 0, 1, 7, 8, 9, 10, 13, 18, 23, 24 ]
         pattern = patterns[named['retry_count']%  len(patterns)]
-        return retrybin.EasyBin('source',[
-            retrybin.create_element( 
+        return utils.EasyBin('source',[
+            utils.create_element( 
                 'videotestsrc', 
                 pattern=pattern, 
                 is_live=True, 
                 name='primary', 
                 num_buffers=100,
             ),
-            retrybin.create_element( 'capsfilter', name='filter', caps=Gst.Caps.from_string(
+            utils.create_element( 'capsfilter', name='filter', caps=Gst.Caps.from_string(
                 caps
             )),
         ])
     def default_build(*args,**named):
-        return retrybin.EasyBin('source',[
-            retrybin.create_element( 'videotestsrc', is_live=True, name='primary', pattern=2 ),
-            retrybin.create_element( 'capsfilter', name='filter', caps=Gst.Caps.from_string(
+        return utils.EasyBin('source',[
+            utils.create_element( 'videotestsrc', is_live=True, name='primary', pattern=2 ),
+            utils.create_element( 'capsfilter', name='filter', caps=Gst.Caps.from_string(
                 caps
             )),
         ])
