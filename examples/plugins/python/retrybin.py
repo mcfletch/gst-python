@@ -1,11 +1,35 @@
-"""Bin showing pad event handling (create a rotate-on-EOS bin)"""
-import logging
+"""Bin showing pad event handling (create a rotate-on-EOS bin)
+
+Copyright 2017 Mike C. Fletcher
+
+Permission is hereby granted, free of charge, to any person 
+obtaining a copy of this software and associated documentation 
+files (the "Software"), to deal in the Software without 
+restriction, including without limitation the rights to use, 
+copy, modify, merge, publish, distribute, sublicense, and/or 
+sell copies of the Software, and to permit persons to whom 
+the Software is furnished to do so, subject to the following 
+conditions:
+
+The above copyright notice and this permission notice shall be 
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, 
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES 
+OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND 
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT 
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, 
+WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR 
+OTHER DEALINGS IN THE SOFTWARE.
+"""
+import logging, time
 import gi
 gi.require_version('Gst','1.0')
 from gi.repository import Gst, GObject
 log = logging.getLogger(__name__)
 
-
+NANOSECOND = 1e6
 
 def create_element(typ,name=None,**properties):
     """Convenience function to create elements in a single call"""
@@ -104,6 +128,7 @@ class RetryBin( Gst.Bin ):
     _block_probe = None
     def on_pad_event(self, pad, probe_info, user_data = None ):
         event = probe_info.get_event()
+        log.info("Event: %s", event.type)
         if event.type == Gst.EventType.EOS:
             (current_element,src,selector_sink) = user_data
             def on_blocked( *args ):
@@ -130,9 +155,112 @@ class RetryBin( Gst.Bin ):
         else:
             return pad.event_default( self.selector, event )
 
+class UDPTimeout( EasyBin ):
+    _timeout = 1.0
+    @GObject.Property(
+        type=float,
+        nick='timeout',
+        default=1.0,
+        blurb='Timeout to apply to the udp sources',
+    )
+    def timeout(self):
+        return self._timeout
+    @timeout.setter
+    def timeout(self,new_timeout):
+        self._timeout = new_timeout
+    def __init__(self, **named ):
+        self.src = create_element( 'udpsrc', **named )
+        self.queue = create_element( 'queue', min_threshold_buffers=5 )
+        super(UDPTimeout,self).__init__('udp-timeout-src',[
+            self.src,
+            self.queue,
+        ])
+        self.queue.connect( 'underrun', self.on_underrun )
+        self.queue.connect( 'running', self.on_pushing )
+        self.started = False
+        self.underrun_ts = 0.0
+    def on_underrun(self, *args, **named ):
+        log.debug("Underrun" )
+        if not self.underrun_ts:
+            self.underrun_ts = time.time()
+        self.should_send_eos()
+        self.set_state( Gst.State.PAUSED )
+        return False
+    def should_send_eos(self):
+        """Check if we should send our EOS event"""
+        delta = (time.time() - self.underrun_ts)
+        if delta < self.timeout:
+            sleep_time = (self.timeout-delta)
+            log.debug('Not yet ready to EOS should set a timer/callback for timeout in %0.1fs',sleep_time)
+            GObject.timeout_add( sleep_time*1000., self.should_send_eos )
+            return False
+        else:
+            log.debug("Timeout, sending the EOS event")
+            pad = self.queue.get_static_pad('sink')
+            eos = Gst.Event.new_eos()
+            pad.send_event( eos )
+            return False
+    def on_pushing(self, *args, **named):
+        log.debug("Pushing data, resetting internal state")
+        self.set_state( Gst.State.PLAYING )
+        self.started = True 
+        self.underrun_ts = 0.0
+        return True
+    
+
+class UDPFailoverBin( RetryBin ):
+    """RetryBin that takes a sequence of UDP Sources and does Failover on them"""
+    _current_index = 0
+    @GObject.Property(
+        type=int,
+        nick='current_index',
+        default=0,
+        blurb='Current index in self.creators which is trying to run...',
+    )
+    def current_index(self):
+        return self._current_index
+    @current_index.setter
+    def current_index(self,new_index):
+        self._current_index = new_index 
+    _timeout = 1.0
+    @GObject.Property(
+        type=float,
+        nick='timeout',
+        default=1.0,
+        blurb='Timeout to apply to the udp sources',
+    )
+    def timeout(self):
+        return self._timeout
+    @timeout.setter
+    def timeout(self,new_timeout):
+        self._timeout = new_timeout
+    def __init__(self, creators, *args, **named):
+        named['default_build'] = named.get('default_build',self.on_failover)
+        self.creators = creators
+        if not creators:
+            raise ValueError("Need at least one element-creation dataset")
+        super(UDPFailoverBin,self).__init__(self.on_failover,*args,**named)
+        #self.child_bus.set_sync_handler( self.child_bus.sync_signal_handler )
+    start = 0
+    underrun = 0
+    def on_message(self, *args ):
+        log.debug("message: %s", args)
+        
+    def on_failover(self, bin, retry_count=None, **named ):
+        """Create the next source to attempt"""
+        self.current_index = (self.current_index +1)%len(self.creators)
+        new_item = self.creators[self.current_index]
+        log.info("Creating element: %s", new_item)
+        element = UDPTimeout(
+            **new_item
+        )
+        return element
+    
 def plugin_init(plugin, userarg=None):
     RetryBinType = GObject.type_register(RetryBin)
     Gst.Element.register(plugin, 'retrybin', 0, RetryBinType)
+    UDPTimeoutType = GObject.type_register(UDPTimeout)
+    Gst.Element.register(plugin, 'udptimeout', 0, UDPTimeoutType)
     return True
 
 version = Gst.version()
