@@ -5,11 +5,13 @@ from gi.repository import Gst, GObject
 Gst.init_check(None)
 import utils
 import retrybin
+log = logging.getLogger(__name__)
 assert retrybin.REGISTRATION_RESULT, """Failed to register the retrybin"""
 
 def test_main():
     """Manually setup a pipeline with direct element creation"""
     logging.basicConfig(level=logging.INFO)
+    log.info("Running on Gstreamer %s",Gst.version_string())
     caps = 'video/x-raw,width=720,height=480,rate=60'
     
     def source_constructor(*args,**named):

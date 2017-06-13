@@ -31,11 +31,11 @@ import utils
 log = logging.getLogger(__name__)
 
 class UDPTimeout( utils.EasyBin ):
-    _timeout = 1.0
+    _timeout = 5.0
     @GObject.Property(
         type=float,
         nick='timeout',
-        default=1.0,
+        default=5.0,
         blurb='Timeout to apply to the udp sources',
     )
     def timeout(self):
@@ -53,34 +53,40 @@ class UDPTimeout( utils.EasyBin ):
         self.queue.connect( 'underrun', self.on_underrun )
         self.queue.connect( 'running', self.on_pushing )
         self.started = False
+        self.stopped = False
         self.underrun_ts = 0.0
     def on_underrun(self, *args, **named ):
-        log.debug("Underrun" )
+        log.debug("Underrun: %s", self.underrun_ts )
         if not self.underrun_ts:
+            log.info("Setting underrun timer")
             self.underrun_ts = time.time()
         self.should_send_eos()
-        self.set_state( Gst.State.PAUSED )
+        #self.set_state( Gst.State.PAUSED )
         return False
     def should_send_eos(self):
         """Check if we should send our EOS event"""
         delta = (time.time() - self.underrun_ts)
-        if delta < self.timeout:
+        if (self.timeout - delta) > .05 :
             sleep_time = (self.timeout-delta)
             log.debug('Not yet ready to EOS should set a timer/callback for timeout in %0.1fs',sleep_time)
             GObject.timeout_add( sleep_time*1000., self.should_send_eos )
             return False
         else:
-            log.debug("Timeout, sending the EOS event")
-            pad = self.queue.get_static_pad('sink')
-            eos = Gst.Event.new_eos()
-            pad.send_event( eos )
+            self.underrun_ts = 0.0
+            if not self.stopped:
+                self.stopped = True
+                log.debug("Timeout, sending the EOS event on %s", self)
+                pad = self.queue.get_static_pad('sink')
+                eos = Gst.Event.new_eos()
+                pad.send_event( eos )
             return False
     def on_pushing(self, *args, **named):
-        log.debug("Pushing data, resetting internal state")
-        self.set_state( Gst.State.PLAYING )
-        self.started = True 
-        self.underrun_ts = 0.0
-        return True
+        if self.queue.get_property('current-level-buffers' ):
+            log.debug("Pushing data, resetting internal state: %s", )
+            #self.set_state( Gst.State.PLAYING )
+            self.started = True 
+            self.underrun_ts = 0.0
+        return False
     
 def plugin_init(plugin, userarg=None):
     UDPTimeoutType = GObject.type_register(UDPTimeout)

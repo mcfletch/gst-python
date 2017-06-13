@@ -11,8 +11,8 @@ def test_main():
     logging.basicConfig(level=logging.DEBUG)
     
     bin = retrybin.UDPFailoverBin([
-        {'address':'224.1.1.2','port':8000,},
-        {'address':'224.1.1.3','port':8000,},
+        {'address':'224.1.1.2','port':8000,'multicast-iface':'lo'},
+        {'address':'224.1.1.3','port':8000,'multicast-iface':'lo'},
     ])
     pipe = Gst.parse_launchv([
         'queue', 'name=input','!',
